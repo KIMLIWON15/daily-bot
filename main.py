@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import datetime
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 # --- [1. 날씨 정보 (풀옵션)] ---
 def get_weather():
@@ -102,19 +103,20 @@ def get_korea_market_focus():
 
 # --- [4. 맞춤형 뉴스 크롤러 (통합 RSS 및 카테고리)] ---
 def search_keyword_news(query, count=2):
-    """구글 뉴스 RSS를 활용해 네이버/다음 뉴스를 차단 없이 검색합니다."""
+    """구글 뉴스 RSS를 XML 파서로 완벽하게 읽어와 네이버/다음 뉴스를 차단 없이 검색합니다."""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         
         res = requests.get(url)
-        soup = BeautifulSoup(res.text, "html.parser")
+        # HTML 파서 대신 파이썬 내장 XML 파서 사용 (링크 실종 버그 완벽 해결)
+        root = ET.fromstring(res.text)
         
-        items = soup.find_all("item")
+        items = root.findall('.//item')
         results = []
         for item in items[:count]:
-            title = item.find("title").text.strip()
-            link = item.find("link").text.strip()
+            title = item.find('title').text.strip()
+            link = item.find('link').text.strip()
             results.append(f"• {title}\n🔗 {link}")
             
         if not results:
