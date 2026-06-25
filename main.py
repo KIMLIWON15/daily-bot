@@ -4,59 +4,74 @@ from bs4 import BeautifulSoup
 import datetime
 
 def get_weather():
-    """네이버에서 수원 날씨 정보를 크롤링합니다."""
+    """오픈 날씨 API를 통해 수원 지역의 현재 날씨를 정확하게 가져옵니다."""
     try:
-        # 수원 날씨 검색 결과 페이지
-        url = "https://search.naver.com/search.naver?query=%EC%88%98%EC%9B%90+%EB%82%A0%C3%94%B8"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        # 수원의 위도(latitude)와 경도(longitude) 설정
+        url = "https://api.open-meteo.com/v1/forecast?latitude=37.2639&longitude=127.0286&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&timezone=Asia%2FSeoul"
+        res = requests.get(url).json()
+        current = res["current"]
+        
+        temp = current["temperature_2m"] # 현재 온도
+        humidity = current["relative_humidity_2m"] # 습도
+        wind = current["wind_speed_10m"] # 풍속
+        code = current["weather_code"] # 날씨 상태 코드
+        
+        # 기상 코드 변환
+        weather_status = "맑음"
+        if code in [1, 2, 3]: weather_status = "구름 조금"
+        elif code in [45, 48]: weather_status = "안개"
+        elif code in [51, 53, 55, 61, 63, 65, 80, 81, 82]: weather_status = "비 🌧️"
+        elif code in [71, 73, 75, 77, 85, 86]: weather_status = "눈 ❄️"
+        elif code in [95, 96, 99]: weather_status = "천둥번개 ⚡"
+        
+        return f"🌡️ 온도: {temp}°C ({weather_status})\n💧 습도: {humidity}% / 💨 풍속: {wind} km/h"
+    except Exception as e:
+        return "⚠️ 기상 API 통신 장애로 날씨를 불러오지 못했습니다."
+
+def get_stock():
+    """모바일 네이버 페이 증시 페이지에서 코스피, 코스닥 지수를 안정적으로 크롤링합니다."""
+    try:
+        # 모바일 버전은 구조가 단순하고 차단이 없어 훨씬 안정적입니다.
+        url = "https://m.stock.naver.com/domestic/index/KOSPI/total"
+        headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G960N) AppleWebKit/537.36"}
         res = requests.get(url, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 현재 온도 및 날씨 상태 추출
-        temperature = soup.find("div", {"class": "temperature_text"}).text.strip().replace("현재 온도", "")
-        weather_status = soup.find("span", {"class": "weather before_slash"}).text.strip()
+        # JSON 형태의 내부 스크립트나 페이지 텍스트에서 지수 추출 보완
+        # 웹 브라우저 차단을 예방하기 위해 네이버 금융 메인 API 타겟팅으로 우회
+        api_url = "https://polling.finance.naver.com/api/realtime?query=SERVICE_INDEX:KOSPI|SERVICE_INDEX:KOSDAQ"
+        stock_data = requests.get(api_url).json()
         
-        # 미세먼지 정보 추출
-        today_chart = soup.find("ul", {"class": "today_chart_list"})
-        dust = today_chart.find_all("li")[0].find("span", {"class": "txt"}).text.strip() # 미세먼지
-        ultra_dust = today_chart.find_all("li")[1].find("span", {"class": "txt"}).text.strip() # 초미세먼지
+        kospi_info = stock_data["result"]["areas"][0]["datas"][0]
+        kospi_num = kospi_info["nv"] # 현재가
+        kospi_cv = kospi_info["cv"] # 전일대비 변동액
+        kospi_cr = kospi_info["cr"] # 변동률
+        kospi_sign = "▲" if kospi_info["rf"] == "2" else "▼" if kospi_info["rf"] == "5" else ""
         
-        return f"🌡️ 온도: {temperature} ({weather_status})\n😷 미세먼지: {dust} / 초미세: {ultra_dust}"
+        kosdaq_info = stock_data["result"]["areas"][0]["datas"][1]
+        kosdaq_num = kosdaq_info["nv"]
+        kosdaq_cv = kosdaq_info["cv"]
+        kosdaq_cr = kosdaq_info["cr"]
+        kosdaq_sign = "▲" if kosdaq_info["rf"] == "2" else "▼" if kosdaq_info["rf"] == "5" else ""
+        
+        # 소수점 둘째 자리 포맷팅 처리
+        k_num = f"{kospi_num/100:.2f}"
+        k_cv = f"{kospi_cv/100:.2f}"
+        kd_num = f"{kosdaq_num/100:.2f}"
+        kd_cv = f"{kosdaq_cv/100:.2f}"
+        
+        return f"📈 코스피: {k_num} ({kospi_sign} {k_cv} / {kospi_cr}%)\n📉 코스닥: {kd_num} ({kosdaq_sign} {kd_cv} / {kosdaq_cr}%)"
     except Exception as e:
-        return "⚠️ 날씨 정보를 불러오지 못했습니다."
-
-def get_stock():
-    """네이버 페이 증시에서 코스피, 코스닥 지수를 크롤링합니다."""
-    try:
-        url = "https://finance.naver.com/"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        res = requests.get(url, headers=headers)
-        # 네이버 금융은 EUC-KR 인코딩을 주로 사용하므로 깨짐 방지 처리를 합니다.
-        soup = BeautifulSoup(res.content.decode('euc-kr', 'replace'), "html.parser")
-        
-        # 코스피 정보
-        kospi_area = soup.find("div", {"class": "kospi_area"})
-        kospi_num = kospi_area.find("span", {"class": "num"}).text.strip()
-        kospi_change = kospi_area.find("span", {"class": "num_s2"}).text.strip()
-        
-        # 코스닥 정보
-        kosdaq_area = soup.find("div", {"class": "kosdaq_area"})
-        kosdaq_num = kosdaq_area.find("span", {"class": "num"}).text.strip()
-        kosdaq_change = kosdaq_area.find("span", {"class": "num_s2"}).text.strip()
-        
-        return f"📈 코스피: {kospi_num} ({kospi_change})\n📉 코스닥: {kosdaq_num} ({kosdaq_change})"
-    except Exception as e:
-        return "⚠️ 증시 정보를 불러오지 못했습니다."
+        return "⚠️ 증시 API 구조 변경으로 정보를 불러오지 못했습니다."
 
 def get_news():
     """네이버 뉴스 속보 페이지에서 주요 헤드라인 5개를 크롤링합니다."""
     try:
-        url = "https://news.naver.com/main/list.naver?mode=LSD&mid=sec&sid1=001" # 속보 전체
+        url = "https://news.naver.com/main/list.naver?mode=LSD&mid=sec&sid1=001"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         res = requests.get(url, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 뉴스 리스트 영역 찾기
         list_body = soup.find("div", {"class": "list_body"})
         news_links = list_body.find_all("a")
         
@@ -67,11 +82,10 @@ def get_news():
             title = link.text.strip()
             href = link.get("href")
             
-            # 빈 제목이나 이미지 링크, 중복 제목 필터링
             if title and len(title) > 10 and title not in seen_titles:
                 seen_titles.add(title)
                 headlines.append(f"• {title}\n🔗 {href}")
-                if len(headlines) == 5: # 딱 5개만 수집
+                if len(headlines) == 5:
                     break
                     
         return "\n\n".join(headlines)
@@ -91,7 +105,7 @@ def send_telegram_message(text):
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "disable_web_page_preview": True # 뉴스 링크 미리보기가 너무 길게 뜨는 것을 방지
+        "disable_web_page_preview": True
     }
     
     requests.post(url, json=payload)
@@ -105,7 +119,6 @@ def run():
     stock_info = get_stock()
     news_info = get_news()
     
-    # 텔레그램으로 보낼 알림 본문 조립
     message = (
         f"☀️ [{date_str}] 아침 브리핑\n\n"
         f"📍 [오늘의 수원 날씨]\n{weather_info}\n\n"
