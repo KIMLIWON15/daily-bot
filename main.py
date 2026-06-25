@@ -86,7 +86,7 @@ def get_market_data():
     # 국내 주요 빅테크 및 이슈 종목 10개 추가
     samsung = get_korea_index("005930", is_stock=True)   # 삼성전자
     hynix = get_korea_index("000660", is_stock=True)     # SK하이닉스
-    lgen sol = get_korea_index("373220", is_stock=True)  # LG에너지솔루션
+    lgensol = get_korea_index("373220", is_stock=True)  # LG에너지솔루션
     hyundai = get_korea_index("005380", is_stock=True)   # 현대차
     kia = get_korea_index("000270", is_stock=True)       # 기아
     celltrion = get_korea_index("068270", is_stock=True) # 셀트리온
