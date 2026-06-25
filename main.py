@@ -41,12 +41,18 @@ def get_weather():
     except: return "⚠️ 날씨 정보를 불러오지 못했습니다."
 
 # --- [2. 증시 및 매크로 지표] ---
-def get_korea_index(ticker_code):
-    """네이버 모바일 공식 API로 코스피/코스닥을 차단 없이 가져옵니다."""
+def get_korea_index(ticker_code, is_stock=False):
+    """네이버 모바일 공식 API로 국내 지수 및 종목 시세를 차단 없이 가져옵니다."""
     try:
-        url = f"https://m.stock.naver.com/api/index/{ticker_code}/basic"
+        # 지수와 개별 종목의 API 주소 분기 처리
+        if is_stock:
+            url = f"https://m.stock.naver.com/api/stock/{ticker_code}/basic"
+        else:
+            url = f"https://m.stock.naver.com/api/index/{ticker_code}/basic"
+            
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         res = requests.get(url, headers=headers).json()
+        
         num = res['closePrice']
         change = res['compareToPreviousClosePrice']
         rate = res['fluctuationsRatio']
@@ -56,7 +62,6 @@ def get_korea_index(ticker_code):
     except: return "확인 불가"
 
 def fetch_yahoo_data(ticker, is_crypto=False):
-    """야후 파이낸스 API 차단을 뚫기 위해 브라우저 위장을 강화합니다."""
     try:
         url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
@@ -74,10 +79,23 @@ def fetch_yahoo_data(ticker, is_crypto=False):
     except: return "확인 불가"
 
 def get_market_data():
-    # 국내 증시 복구
+    # 국내 지수
     kospi = get_korea_index("KOSPI")
     kosdaq = get_korea_index("KOSDAQ")
     
+    # 국내 주요 빅테크 및 이슈 종목 10개 추가
+    samsung = get_korea_index("005930", is_stock=True)   # 삼성전자
+    hynix = get_korea_index("000660", is_stock=True)     # SK하이닉스
+    lgen sol = get_korea_index("373220", is_stock=True)  # LG에너지솔루션
+    hyundai = get_korea_index("005380", is_stock=True)   # 현대차
+    kia = get_korea_index("000270", is_stock=True)       # 기아
+    celltrion = get_korea_index("068270", is_stock=True) # 셀트리온
+    sambao = get_korea_index("207940", is_stock=True)    # 삼성바이오로직스
+    naver = get_korea_index("035420", is_stock=True)     # NAVER
+    kakao = get_korea_index("035720", is_stock=True)     # 카카오
+    alteogen = get_korea_index("196170", is_stock=True)  # 알테오젠 (코스닥 대장/이슈)
+    
+    # 미국 지수 및 매크로 지표
     dji = fetch_yahoo_data("^DJI")
     spx = fetch_yahoo_data("^GSPC")
     ndx = fetch_yahoo_data("^IXIC")
@@ -97,6 +115,11 @@ def get_market_data():
     macro_text = (
         f"[국내 주요 지수]\n"
         f"• 코스피: {kospi}\n• 코스닥: {kosdaq}\n\n"
+        f"[국내 주요 종목 10선]\n"
+        f"• 삼성전자: {samsung}\n• SK하이닉스: {hynix}\n• LG에너지솔루션: {lgensol}\n"
+        f"• 현대차: {hyundai}\n• 기아: {kia}\n• 셀트리온: {celltrion}\n"
+        f"• 삼성바이오: {sambao}\n• NAVER: {naver}\n• 카카오: {kakao}\n"
+        f"• 알테오젠: {alteogen}\n\n"
         f"[미국 주요 지수]\n"
         f"• 다우존스: {dji}\n• S&P500: {spx}\n• 나스닥: {ndx}\n• 필라델피아 반도체: {sox}\n\n"
         f"[주요 빅테크]\n"
@@ -123,7 +146,7 @@ def get_korea_market_focus():
         return "\n\n".join(results)
     except: return "⚠️ 국내 증시 관전 포인트를 불러오지 못했습니다."
 
-# --- [4. 맞춤형 뉴스 크롤러] ---
+# --- [4. 맞춤형 뉴스 크롤러 (통합 우회 검색)] ---
 def search_keyword_news(query, count=2):
     try:
         encoded_query = urllib.parse.quote(query)
@@ -166,24 +189,9 @@ def get_category_news(sid1, count=3):
         return "\n\n".join(results)
     except: return "⚠️ 카테고리 뉴스를 불러오지 못했습니다."
 
-def get_boannews(count=3):
-    try:
-        url = "https://www.boannews.com/media/t_list.asp"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        soup = BeautifulSoup(requests.get(url, headers=headers).text, "html.parser")
-        
-        items = soup.select(".news_list")
-        results = []
-        for item in items[:count]:
-            title = html.escape(item.select_one(".news_txt").text.strip())
-            link = "https://www.boannews.com" + item.select_one("a").get("href")
-            results.append(f"• <a href='{link}'>{title}</a>")
-        return "\n\n".join(results)
-    except: return "⚠️ 보안뉴스 정보를 불러오지 못했습니다."
-
 def get_all_news():
     news_parts = []
-    news_parts.append(f"🛡️ [국내 보안이슈 (보안뉴스)]\n{get_boannews(3)}")
+    news_parts.append(f"🛡️ [국내 보안이슈]\n{search_keyword_news('정보보안 OR 랜섬웨어 OR 사이버위협', 3)}")
     news_parts.append(f"🏢 [보안회사 동향]\n{search_keyword_news('보안회사 OR 정보보안기업', 2)}")
     news_parts.append(f"🔐 [제로트러스트 & N2FS]\n{search_keyword_news('제로트러스트 OR N2FS', 2)}")
     news_parts.append(f"📈 [오늘의 경제]\n{get_category_news('101', 3)}")
