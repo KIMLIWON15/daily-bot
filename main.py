@@ -27,35 +27,37 @@ def get_weather():
         return "⚠️ 기상 API 통신 장애로 날씨를 불러오지 못했습니다."
 
 def get_stock():
-    """네이버 금융 메인 페이지에서 코스피, 코스닥 지수를 가장 확실한 정공법으로 크롤링합니다."""
+    """네이버 모바일 증시 공식 API(JSON)를 사용하여 완벽하게 데이터를 가져옵니다."""
     try:
-        url = "https://finance.naver.com/"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        res = requests.get(url, headers=headers)
-        soup = BeautifulSoup(res.content.decode('euc-kr', 'replace'), "html.parser")
+        headers = {"User-Agent": "Mozilla/5.0"}
         
-        # 1. 코스피 정보 추출 (블라인드 텍스트 포함 정교한 파싱)
-        kospi_area = soup.find("div", {"class": "kospi_area"})
-        k_num = kospi_area.find("span", {"class": "num"}).text.strip()
-        # 상승/하락 기호와 수치 결합
-        k_change = kospi_area.find("span", {"class": "num_s2"}).text.strip()
-        k_change = k_change.replace("상승", "▲ ").replace("하락", "▼ ").replace("보합", "")
+        # 1. 코스피 데이터 추출
+        k_url = "https://m.stock.naver.com/api/index/KOSPI/basic"
+        k_res = requests.get(k_url, headers=headers).json()
+        k_num = k_res['closePrice'] # 현재 지수
+        k_change = k_res['compareToPreviousClosePrice'] # 등락폭
+        k_rate = k_res['fluctuationsRatio'] # 등락률
+        k_code = k_res['compareToPreviousPrice']['code'] # 상승(2)/하락(5) 코드
+        k_sign = "▲" if k_code == "2" else "▼" if k_code == "5" else "-"
         
-        # 2. 코스닥 정보 추출
-        kosdaq_area = soup.find("div", {"class": "kosdaq_area"})
-        kd_num = kosdaq_area.find("span", {"class": "num"}).text.strip()
-        kd_change = kosdaq_area.find("span", {"class": "num_s2"}).text.strip()
-        kd_change = kd_change.replace("상승", "▲ ").replace("하락", "▼ ").replace("보합", "")
+        # 2. 코스닥 데이터 추출
+        kd_url = "https://m.stock.naver.com/api/index/KOSDAQ/basic"
+        kd_res = requests.get(kd_url, headers=headers).json()
+        kd_num = kd_res['closePrice']
+        kd_change = kd_res['compareToPreviousClosePrice']
+        kd_rate = kd_res['fluctuationsRatio']
+        kd_code = kd_res['compareToPreviousPrice']['code']
+        kd_sign = "▲" if kd_code == "2" else "▼" if kd_code == "5" else "-"
         
-        return f"📈 코스피: {k_num} ({k_change})\n📉 코스닥: {kd_num} ({kd_change})"
+        return f"📈 코스피: {k_num} ({k_sign} {k_change} / {k_rate}%)\n📉 코스닥: {kd_num} ({kd_sign} {kd_change} / {kd_rate}%)"
     except Exception as e:
-        return "⚠️ 증시 정보를 불러오지 못했습니다."
+        return f"⚠️ 증시 정보를 불러오지 못했습니다."
 
 def get_news():
     """네이버 뉴스 속보 페이지에서 주요 헤드라인 5개를 크롤링합니다."""
     try:
         url = "https://news.naver.com/main/list.naver?mode=LSD&mid=sec&sid1=001"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         res = requests.get(url, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
         
