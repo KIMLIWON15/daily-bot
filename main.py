@@ -2,15 +2,26 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import datetime
+import urllib.parse
 
-# --- [1. 날씨 정보] ---
+# --- [1. 날씨 정보 (풀옵션)] ---
 def get_weather():
     try:
-        url = "https://api.open-meteo.com/v1/forecast?latitude=37.2639&longitude=127.0286&current=temperature_2m,relative_humidity_2m,weather_code&timezone=Asia%2FSeoul"
-        res = requests.get(url).json()["current"]
+        url = "https://api.open-meteo.com/v1/forecast?latitude=37.2639&longitude=127.0286&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FSeoul"
+        res = requests.get(url).json()
         
-        temp = res["temperature_2m"]
-        code = res["weather_code"]
+        current = res["current"]
+        daily = res["daily"]
+        
+        temp = current["temperature_2m"]
+        feels_like = current["apparent_temperature"]
+        humidity = current["relative_humidity_2m"]
+        wind = current["wind_speed_10m"]
+        code = current["weather_code"]
+        
+        temp_max = daily["temperature_2m_max"][0]
+        temp_min = daily["temperature_2m_min"][0]
+        precip_prob = daily["precipitation_probability_max"][0]
         
         weather = "맑음 ☀️"
         if code in [1, 2, 3]: weather = "구름 ☁️"
@@ -18,10 +29,16 @@ def get_weather():
         elif code in [51, 53, 55, 61, 63, 65, 80, 81, 82]: weather = "비 🌧️"
         elif code in [71, 73, 75, 77, 85, 86]: weather = "눈 ❄️"
         
-        return f"🌡️ 온도: {temp}°C ({weather})"
+        weather_text = (
+            f"🌡️ 현재: {temp}°C (체감 {feels_like}°C) / {weather}\n"
+            f"📈 최저/최고: {temp_min}°C / {temp_max}°C\n"
+            f"☔ 강수 확률: {precip_prob}%\n"
+            f"💧 습도: {humidity}% / 💨 풍속: {wind}km/h"
+        )
+        return weather_text
     except: return "⚠️ 날씨 정보를 불러오지 못했습니다."
 
-# --- [2. 증시 및 매크로 지표 파서 (야후 파이낸스 API)] ---
+# --- [2. 증시 및 매크로 지표 (야후 파이낸스 API)] ---
 def fetch_yahoo_data(ticker, is_crypto=False):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
@@ -40,24 +57,21 @@ def fetch_yahoo_data(ticker, is_crypto=False):
     except: return "N/A"
 
 def get_market_data():
-    # 1. 미국 3대 지수 & 필라델피아 반도체
     dji = fetch_yahoo_data("^DJI")
     spx = fetch_yahoo_data("^GSPC")
     ndx = fetch_yahoo_data("^IXIC")
     sox = fetch_yahoo_data("^SOX")
     
-    # 2. 빅테크 동향
     nvda = fetch_yahoo_data("NVDA")
     tsla = fetch_yahoo_data("TSLA")
     aapl = fetch_yahoo_data("AAPL")
     
-    # 3. 시장 지표 (환율, 금리, 유가, VIX, 비트코인)
     usdkrw = fetch_yahoo_data("KRW=X")
-    tnx = fetch_yahoo_data("^TNX") # 10년물 금리는 % 자체가 price
+    tnx = fetch_yahoo_data("^TNX")
     wti = fetch_yahoo_data("CL=F")
     vix = fetch_yahoo_data("^VIX")
     btc = fetch_yahoo_data("BTC-USD", is_crypto=True)
-    ewy = fetch_yahoo_data("EWY") # MSCI 한국지수 ETF
+    ewy = fetch_yahoo_data("EWY")
     
     macro_text = (
         f"[미국 주요 지수]\n"
@@ -73,39 +87,48 @@ def get_market_data():
 # --- [3. 국내 증시 관전 포인트 (네이버 시황 기사)] ---
 def get_korea_market_focus():
     try:
-        url = "https://finance.naver.com/news/news_list.naver?mode=LSS2D&section_id=101&section_id2=258" # 시황/전망
-        headers = {"User-Agent": "Mozilla/5.0"}
+        url = "https://finance.naver.com/news/news_list.naver?mode=LSS2D&section_id=101&section_id2=258"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         soup = BeautifulSoup(requests.get(url, headers=headers).content.decode('euc-kr', 'replace'), "html.parser")
         
         subjects = soup.select(".articleSubject a")
         results = []
-        for a in subjects[:3]: # 상위 3개 시황
-            results.append(f"• {a.text.strip()}")
-        return "\n".join(results)
+        for a in subjects[:3]:
+            title = a.text.strip()
+            link = "https://finance.naver.com" + a.get("href")
+            results.append(f"• {title}\n🔗 {link}")
+        return "\n\n".join(results)
     except: return "⚠️ 국내 증시 관전 포인트를 불러오지 못했습니다."
 
-# --- [4. 맞춤형 뉴스 크롤러] ---
-def search_naver_news(query, count=2):
-    """네이버 뉴스 검색 결과를 가져옵니다."""
+# --- [4. 맞춤형 뉴스 크롤러 (통합 RSS 및 카테고리)] ---
+def search_keyword_news(query, count=2):
+    """구글 뉴스 RSS를 활용해 네이버/다음 뉴스를 차단 없이 검색합니다."""
     try:
-        url = f"https://search.naver.com/search.naver?where=news&query={query}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        soup = BeautifulSoup(requests.get(url, headers=headers).text, "html.parser")
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         
-        items = soup.select(".news_tit")
+        res = requests.get(url)
+        soup = BeautifulSoup(res.text, "html.parser")
+        
+        items = soup.find_all("item")
         results = []
         for item in items[:count]:
-            title = item.text.strip()
-            link = item.get("href")
+            title = item.find("title").text.strip()
+            link = item.find("link").text.strip()
             results.append(f"• {title}\n🔗 {link}")
-        return "\n".join(results)
-    except: return f"⚠️ '{query}' 뉴스를 불러오지 못했습니다."
+            
+        if not results:
+            return f"⚠️ '{query}' 관련 최신 뉴스가 없습니다."
+            
+        return "\n\n".join(results)
+    except Exception as e:
+        return f"⚠️ '{query}' 뉴스를 불러오지 못했습니다."
 
 def get_category_news(sid1, count=3):
     """네이버 속보 카테고리(경제/사회)를 가져옵니다."""
     try:
         url = f"https://news.naver.com/main/list.naver?mode=LSD&mid=sec&sid1={sid1}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         soup = BeautifulSoup(requests.get(url, headers=headers).text, "html.parser")
         
         links = soup.select(".list_body a")
@@ -118,14 +141,14 @@ def get_category_news(sid1, count=3):
                 seen.add(title)
                 results.append(f"• {title}\n🔗 {href}")
                 if len(results) == count: break
-        return "\n".join(results)
+        return "\n\n".join(results)
     except: return "⚠️ 카테고리 뉴스를 불러오지 못했습니다."
 
 def get_boannews(count=3):
     """보안뉴스(boannews.com) 메인 기사를 가져옵니다."""
     try:
         url = "https://www.boannews.com/media/t_list.asp"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         soup = BeautifulSoup(requests.get(url, headers=headers).text, "html.parser")
         
         items = soup.select(".news_list")
@@ -134,29 +157,34 @@ def get_boannews(count=3):
             title = item.select_one(".news_txt").text.strip()
             link = "https://www.boannews.com" + item.select_one("a").get("href")
             results.append(f"• {title}\n🔗 {link}")
-        return "\n".join(results)
+        return "\n\n".join(results)
     except: return "⚠️ 보안뉴스 정보를 불러오지 못했습니다."
 
 def get_all_news():
     news_parts = []
     news_parts.append(f"🛡️ [국내 보안이슈 (보안뉴스)]\n{get_boannews(3)}")
-    news_parts.append(f"🏢 [보안회사 동향]\n{search_naver_news('보안회사 OR 정보보안기업', 2)}")
-    news_parts.append(f"🔐 [제로트러스트 & N2FS]\n{search_naver_news('제로트러스트 OR N2FS', 3)}")
+    news_parts.append(f"🏢 [보안회사 동향]\n{search_keyword_news('보안회사 OR 정보보안기업', 2)}")
+    news_parts.append(f"🔐 [제로트러스트 & N2FS]\n{search_keyword_news('제로트러스트 OR N2FS', 2)}")
     news_parts.append(f"📈 [오늘의 경제]\n{get_category_news('101', 3)}")
     news_parts.append(f"👥 [오늘의 사회]\n{get_category_news('102', 3)}")
-    return "\n\n".join(news_parts)
+    return "\n\n━━━━━━━━━━━━━━━\n\n".join(news_parts)
 
 # --- [5. 텔레그램 전송] ---
 def send_telegram_message(text):
     bot_token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
+    if not bot_token or not chat_id:
+        print("❌ 에러: 깃허브 Secrets 설정 확인 필요")
+        return
+
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
         "disable_web_page_preview": True # 긴 뉴스 미리보기 방지
     }
+    
     requests.post(url, json=payload)
 
 def run():
@@ -172,9 +200,9 @@ def run():
     message = (
         f"📊 [{date_str}] 인텔리전스 브리핑\n\n"
         f"📍 [오늘의 수원 날씨]\n{weather}\n\n"
-        f"━━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━━━\n\n"
         f"🌐 [글로벌 증시 & 매크로]\n{market_macro}\n\n"
-        f"🎯 [국내 증시 관전 포인트 (시황)]\n{market_focus}\n"
+        f"🎯 [국내 증시 관전 포인트]\n{market_focus}\n\n"
         f"━━━━━━━━━━━━━━━\n\n"
         f"{news}"
     )
