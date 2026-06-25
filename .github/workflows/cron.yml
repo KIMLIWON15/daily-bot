@@ -24,6 +24,6 @@ jobs:
 
     - name: 4. 파이썬 스크립트 실행하기
       env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_TOKEN: ${{ secrets.telegram_token }}
+        TELEGRAM_CHAT_ID: ${{ secrets.telegram_chat_id }}
       run: python main.py
