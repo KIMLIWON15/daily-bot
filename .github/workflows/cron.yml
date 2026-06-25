@@ -28,3 +28,8 @@ jobs:
 
     - name: 4. 파이썬 스크립트 실행하기
       run: python main.py
+env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        # 💡 참고: 내 텔레그램 채팅방 ID도 금고에 넣었다면 아래처럼 추가 가능합니다.
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python main.py
