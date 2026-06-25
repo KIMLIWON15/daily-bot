@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
+import html # 하이퍼링크 텍스트 변환을 위한 모듈
 
 # --- [1. 날씨 정보 (풀옵션)] ---
 def get_weather():
@@ -39,7 +40,7 @@ def get_weather():
         return weather_text
     except: return "⚠️ 날씨 정보를 불러오지 못했습니다."
 
-# --- [2. 증시 및 매크로 지표 (야후 파이낸스 API)] ---
+# --- [2. 증시 및 매크로 지표] ---
 def fetch_yahoo_data(ticker, is_crypto=False):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
@@ -85,7 +86,7 @@ def get_market_data():
     )
     return macro_text
 
-# --- [3. 국내 증시 관전 포인트 (네이버 시황 기사)] ---
+# --- [3. 국내 증시 관전 포인트] ---
 def get_korea_market_focus():
     try:
         url = "https://finance.naver.com/news/news_list.naver?mode=LSS2D&section_id=101&section_id2=258"
@@ -95,29 +96,28 @@ def get_korea_market_focus():
         subjects = soup.select(".articleSubject a")
         results = []
         for a in subjects[:3]:
-            title = a.text.strip()
+            title = html.escape(a.text.strip())
             link = "https://finance.naver.com" + a.get("href")
-            results.append(f"• {title}\n🔗 {link}")
+            # HTML 하이퍼링크 적용
+            results.append(f"• <a href='{link}'>{title}</a>")
         return "\n\n".join(results)
     except: return "⚠️ 국내 증시 관전 포인트를 불러오지 못했습니다."
 
 # --- [4. 맞춤형 뉴스 크롤러 (통합 RSS 및 카테고리)] ---
 def search_keyword_news(query, count=2):
-    """구글 뉴스 RSS를 XML 파서로 완벽하게 읽어와 네이버/다음 뉴스를 차단 없이 검색합니다."""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         
         res = requests.get(url)
-        # HTML 파서 대신 파이썬 내장 XML 파서 사용 (링크 실종 버그 완벽 해결)
         root = ET.fromstring(res.text)
         
         items = root.findall('.//item')
         results = []
         for item in items[:count]:
-            title = item.find('title').text.strip()
+            title = html.escape(item.find('title').text.strip())
             link = item.find('link').text.strip()
-            results.append(f"• {title}\n🔗 {link}")
+            results.append(f"• <a href='{link}'>{title}</a>")
             
         if not results:
             return f"⚠️ '{query}' 관련 최신 뉴스가 없습니다."
@@ -127,7 +127,6 @@ def search_keyword_news(query, count=2):
         return f"⚠️ '{query}' 뉴스를 불러오지 못했습니다."
 
 def get_category_news(sid1, count=3):
-    """네이버 속보 카테고리(경제/사회)를 가져옵니다."""
     try:
         url = f"https://news.naver.com/main/list.naver?mode=LSD&mid=sec&sid1={sid1}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -141,13 +140,13 @@ def get_category_news(sid1, count=3):
             href = link.get("href")
             if title and len(title) > 10 and title not in seen:
                 seen.add(title)
-                results.append(f"• {title}\n🔗 {href}")
+                safe_title = html.escape(title)
+                results.append(f"• <a href='{href}'>{safe_title}</a>")
                 if len(results) == count: break
         return "\n\n".join(results)
     except: return "⚠️ 카테고리 뉴스를 불러오지 못했습니다."
 
 def get_boannews(count=3):
-    """보안뉴스(boannews.com) 메인 기사를 가져옵니다."""
     try:
         url = "https://www.boannews.com/media/t_list.asp"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -156,9 +155,9 @@ def get_boannews(count=3):
         items = soup.select(".news_list")
         results = []
         for item in items[:count]:
-            title = item.select_one(".news_txt").text.strip()
+            title = html.escape(item.select_one(".news_txt").text.strip())
             link = "https://www.boannews.com" + item.select_one("a").get("href")
-            results.append(f"• {title}\n🔗 {link}")
+            results.append(f"• <a href='{link}'>{title}</a>")
         return "\n\n".join(results)
     except: return "⚠️ 보안뉴스 정보를 불러오지 못했습니다."
 
@@ -171,7 +170,7 @@ def get_all_news():
     news_parts.append(f"👥 [오늘의 사회]\n{get_category_news('102', 3)}")
     return "\n\n━━━━━━━━━━━━━━━\n\n".join(news_parts)
 
-# --- [5. 텔레그램 전송] ---
+# --- [5. 텔레그램 전송 (HTML 모드 적용)] ---
 def send_telegram_message(text):
     bot_token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -184,14 +183,16 @@ def send_telegram_message(text):
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "disable_web_page_preview": True # 긴 뉴스 미리보기 방지
+        "parse_mode": "HTML", # 텔레그램이 하이퍼링크를 인식하도록 HTML 모드 켜기
+        "disable_web_page_preview": True
     }
     
     requests.post(url, json=payload)
 
 def run():
-    now = datetime.datetime.now()
-    date_str = now.strftime('%Y년 %m월 %d일 %H:%M')
+    # 세계표준시(UTC)에 9시간을 더해 무조건 한국 시간(KST)으로 고정
+    kst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    date_str = kst_now.strftime('%Y년 %m월 %d일 %H:%M')
     
     print("데이터 수집 시작...")
     weather = get_weather()
