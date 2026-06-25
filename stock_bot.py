@@ -1,6 +1,7 @@
 import os
 import requests
 import datetime
+import time  # 봇이 너무 빨라 차단당하는 것을 막기 위한 모듈 추가
 
 # 🎯 감시할 주식 종목 (10개 카테고리 x 10종목 = 총 100개)
 TARGET_CATEGORIES = {
@@ -46,34 +47,52 @@ TARGET_CATEGORIES = {
     }
 }
 
-# ⚠️ 변동성 알림 기준 (시가 대비 3% 이상 상승 또는 하락 시 알림)
+# ⚠️ 변동성 알림 기준
 VOLATILITY_LIMIT = 3.0
 
 def get_stock_data(code):
     try:
         url = f"https://m.stock.naver.com/api/stock/{code}/basic"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        res = requests.get(url, headers=headers).json()
+        # 브라우저 위장 강화
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
+        res = requests.get(url, headers=headers, timeout=5)
         
-        current_price = float(res['closePrice'].replace(",", ""))
-        open_price = float(res['openPrice'].replace(",", ""))
+        if res.status_code != 200:
+            return None
+            
+        data = res.json()
         
-        change = res['compareToPreviousClosePrice']
-        rate = res['fluctuationsRatio']
-        sign_code = res['compareToPreviousPrice']['code']
+        # 자정 리셋 시간대 에러 방지를 위해 안전하게 값 가져오기
+        close_price_str = data.get('closePrice', '0')
+        open_price_str = data.get('openPrice', '0')
+        
+        try:
+            current_price = float(close_price_str.replace(",", ""))
+        except:
+            current_price = 0.0
+            
+        try:
+            open_price = float(open_price_str.replace(",", ""))
+        except:
+            open_price = 0.0
+            
+        change = data.get('compareToPreviousClosePrice', '0')
+        rate = data.get('fluctuationsRatio', '0.00')
+        
+        prev_price_info = data.get('compareToPreviousPrice', {})
+        sign_code = prev_price_info.get('code', '3')
         sign = "▲" if sign_code == "2" else "▼" if sign_code == "5" else "-"
         
-        if open_price > 0:
+        open_calc_rate = 0.0
+        if open_price > 0 and current_price > 0:
             open_calc_rate = ((current_price - open_price) / open_price) * 100
-        else:
-            open_calc_rate = 0.0
             
         return {
-            "current": res['closePrice'],
+            "current": close_price_str,
             "change_text": f"{sign} {change} / {rate}%",
             "open_rate": open_calc_rate
         }
-    except:
+    except Exception as e:
         return None
 
 def run():
@@ -90,24 +109,27 @@ def run():
         for code, name in stocks.items():
             data = get_stock_data(code)
             if not data:
-                continue
+                # 에러가 나도 종목을 아예 지우지 않고 상태를 표시하도록 개선
+                category_text.append(f"• {name}: 정보 업데이트 중")
+            else:
+                category_text.append(f"• {name}: {data['current']} ({data['change_text']})")
                 
-            category_text.append(f"• {name}: {data['current']} ({data['change_text']})")
+                open_rate = data['open_rate']
+                if abs(open_rate) >= VOLATILITY_LIMIT:
+                    direction = "급등 🚀" if open_rate > 0 else "급락 📉"
+                    urgent_messages.append(
+                        f"🚨 <b>[긴급 변동 알림]</b>\n"
+                        f"• 종목명: <b>{name}</b> ({direction})\n"
+                        f"• 현재가: {data['current']}\n"
+                        f"• <b>시작가 대비 변동률: {open_rate:+.2f}%</b>\n"
+                        f"• 전일대비: {data['change_text']}"
+                    )
             
-            # 조건부 변동성 체크 (3% 이상)
-            open_rate = data['open_rate']
-            if abs(open_rate) >= VOLATILITY_LIMIT:
-                direction = "급등 🚀" if open_rate > 0 else "급락 📉"
-                urgent_messages.append(
-                    f"🚨 <b>[긴급 변동 알림]</b>\n"
-                    f"• 종목명: <b>{name}</b> ({direction})\n"
-                    f"• 현재가: {data['current']}\n"
-                    f"• <b>시작가 대비 변동률: {open_rate:+.2f}%</b>\n"
-                    f"• 전일대비: {data['change_text']}"
-                )
+            # 🔥 핵심: 네이버 서버 차단을 막기 위해 한 종목 조회 후 0.2초 휴식
+            time.sleep(0.2)
+            
         category_text.append("")
         
-        # 텔레그램 글자 수 제한 방지: 3000자가 넘어가면 메시지를 자르고 새로 담기
         if len("\n".join(current_message)) + len("\n".join(category_text)) > 3000:
             messages_to_send.append("\n".join(current_message))
             current_message = [f"📊 <b>[{time_str}] 주요 섹터별 시세 현황 (이어서)</b>\n"]
@@ -121,12 +143,10 @@ def run():
     chat_id = os.environ.get('STOCK_CHAT_ID')
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-    # 1. 3% 이상 변동된 긴급 종목 우선 발송
     if urgent_messages:
         for urgent_msg in urgent_messages:
             requests.post(url, json={"chat_id": chat_id, "text": urgent_msg, "parse_mode": "HTML"})
             
-    # 2. 정기 리포트 발송 (자동 분할 전송)
     for msg in messages_to_send:
         requests.post(url, json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"})
 
