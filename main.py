@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
-import html # 하이퍼링크 텍스트 변환을 위한 모듈
+import html
 
 # --- [1. 날씨 정보 (풀옵션)] ---
 def get_weather():
@@ -41,10 +41,25 @@ def get_weather():
     except: return "⚠️ 날씨 정보를 불러오지 못했습니다."
 
 # --- [2. 증시 및 매크로 지표] ---
-def fetch_yahoo_data(ticker, is_crypto=False):
+def get_korea_index(ticker_code):
+    """네이버 모바일 공식 API로 코스피/코스닥을 차단 없이 가져옵니다."""
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://m.stock.naver.com/api/index/{ticker_code}/basic"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        res = requests.get(url, headers=headers).json()
+        num = res['closePrice']
+        change = res['compareToPreviousClosePrice']
+        rate = res['fluctuationsRatio']
+        code = res['compareToPreviousPrice']['code']
+        sign = "▲" if code == "2" else "▼" if code == "5" else "-"
+        return f"{num} ({sign} {change} / {rate}%)"
+    except: return "확인 불가"
+
+def fetch_yahoo_data(ticker, is_crypto=False):
+    """야후 파이낸스 API 차단을 뚫기 위해 브라우저 위장을 강화합니다."""
+    try:
+        url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
         res = requests.get(url, headers=headers).json()
         meta = res['chart']['result'][0]['meta']
         price = meta['regularMarketPrice']
@@ -56,9 +71,13 @@ def fetch_yahoo_data(ticker, is_crypto=False):
         if is_crypto:
             return f"{price:,.0f} ({sign} {abs(rate):.2f}%)"
         return f"{price:,.2f} ({sign} {abs(rate):.2f}%)"
-    except: return "N/A"
+    except: return "확인 불가"
 
 def get_market_data():
+    # 국내 증시 복구
+    kospi = get_korea_index("KOSPI")
+    kosdaq = get_korea_index("KOSDAQ")
+    
     dji = fetch_yahoo_data("^DJI")
     spx = fetch_yahoo_data("^GSPC")
     ndx = fetch_yahoo_data("^IXIC")
@@ -76,6 +95,8 @@ def get_market_data():
     ewy = fetch_yahoo_data("EWY")
     
     macro_text = (
+        f"[국내 주요 지수]\n"
+        f"• 코스피: {kospi}\n• 코스닥: {kosdaq}\n\n"
         f"[미국 주요 지수]\n"
         f"• 다우존스: {dji}\n• S&P500: {spx}\n• 나스닥: {ndx}\n• 필라델피아 반도체: {sox}\n\n"
         f"[주요 빅테크]\n"
@@ -98,12 +119,11 @@ def get_korea_market_focus():
         for a in subjects[:3]:
             title = html.escape(a.text.strip())
             link = "https://finance.naver.com" + a.get("href")
-            # HTML 하이퍼링크 적용
             results.append(f"• <a href='{link}'>{title}</a>")
         return "\n\n".join(results)
     except: return "⚠️ 국내 증시 관전 포인트를 불러오지 못했습니다."
 
-# --- [4. 맞춤형 뉴스 크롤러 (통합 RSS 및 카테고리)] ---
+# --- [4. 맞춤형 뉴스 크롤러] ---
 def search_keyword_news(query, count=2):
     try:
         encoded_query = urllib.parse.quote(query)
@@ -170,7 +190,7 @@ def get_all_news():
     news_parts.append(f"👥 [오늘의 사회]\n{get_category_news('102', 3)}")
     return "\n\n━━━━━━━━━━━━━━━\n\n".join(news_parts)
 
-# --- [5. 텔레그램 전송 (HTML 모드 적용)] ---
+# --- [5. 텔레그램 전송 (HTML 모드)] ---
 def send_telegram_message(text):
     bot_token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -183,14 +203,13 @@ def send_telegram_message(text):
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML", # 텔레그램이 하이퍼링크를 인식하도록 HTML 모드 켜기
+        "parse_mode": "HTML", 
         "disable_web_page_preview": True
     }
     
     requests.post(url, json=payload)
 
 def run():
-    # 세계표준시(UTC)에 9시간을 더해 무조건 한국 시간(KST)으로 고정
     kst_now = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     date_str = kst_now.strftime('%Y년 %m월 %d일 %H:%M')
     
@@ -204,7 +223,7 @@ def run():
         f"📊 [{date_str}] 인텔리전스 브리핑\n\n"
         f"📍 [오늘의 수원 날씨]\n{weather}\n\n"
         f"━━━━━━━━━━━━━━━\n\n"
-        f"🌐 [글로벌 증시 & 매크로]\n{market_macro}\n\n"
+        f"🌐 [증시 & 매크로 지표]\n{market_macro}\n\n"
         f"🎯 [국내 증시 관전 포인트]\n{market_focus}\n\n"
         f"━━━━━━━━━━━━━━━\n\n"
         f"{news}"
