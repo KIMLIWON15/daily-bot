@@ -1,11 +1,6 @@
 name: Daily Intelligence Briefing Bot
 
 on:
-  schedule:
-    # ⏱️ 한국 시간 매일(월~금) 아침 07:00에 정밀 실행
-    # 깃허브 서버(UTC) 기준으로는 전날 밤 22:00에 해당하므로, 
-    # 요일을 0-4(일요일~목요일)로 설정해야 한국 시간 월~금 아침에 정확히 작동합니다.
-    - cron: '0 22 * * 0-4'
   workflow_dispatch:
 
 jobs:
