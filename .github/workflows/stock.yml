@@ -1,10 +1,6 @@
 name: Stock Tracker Bot
 
 on:
-  schedule:
-    - cron: '1 23 * * 0-4'
-    - cron: '10 0-10 * * 1-5'
-    - cron: '1 11 * * 1-5'
   workflow_dispatch:
 
 jobs:
