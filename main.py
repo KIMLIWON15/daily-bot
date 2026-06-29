@@ -44,7 +44,6 @@ def get_weather():
 def get_korea_index(ticker_code, is_stock=False):
     """네이버 모바일 공식 API로 국내 지수 및 종목 시세를 차단 없이 가져옵니다."""
     try:
-        # 지수와 개별 종목의 API 주소 분기 처리
         if is_stock:
             url = f"https://m.stock.naver.com/api/stock/{ticker_code}/basic"
         else:
@@ -79,11 +78,9 @@ def fetch_yahoo_data(ticker, is_crypto=False):
     except: return "확인 불가"
 
 def get_market_data():
-    # 국내 지수
     kospi = get_korea_index("KOSPI")
     kosdaq = get_korea_index("KOSDAQ")
     
-    # 국내 주요 빅테크 및 이슈 종목 10개 추가
     samsung = get_korea_index("005930", is_stock=True)   # 삼성전자
     hynix = get_korea_index("000660", is_stock=True)     # SK하이닉스
     lgensol = get_korea_index("373220", is_stock=True)  # LG에너지솔루션
@@ -93,9 +90,8 @@ def get_market_data():
     sambao = get_korea_index("207940", is_stock=True)    # 삼성바이오로직스
     naver = get_korea_index("035420", is_stock=True)     # NAVER
     kakao = get_korea_index("035720", is_stock=True)     # 카카오
-    alteogen = get_korea_index("196170", is_stock=True)  # 알테오젠 (코스닥 대장/이슈)
+    alteogen = get_korea_index("196170", is_stock=True)  # 알테오젠
     
-    # 미국 지수 및 매크로 지표
     dji = fetch_yahoo_data("^DJI")
     spx = fetch_yahoo_data("^GSPC")
     ndx = fetch_yahoo_data("^IXIC")
@@ -189,13 +185,62 @@ def get_category_news(sid1, count=3):
         return "\n\n".join(results)
     except: return "⚠️ 카테고리 뉴스를 불러오지 못했습니다."
 
+# --- [4-1. 전문 매체 (보안뉴스) 속보 크롤러] ---
+def get_boannews(count=3):
+    """보안뉴스 RSS에서 핵심 키워드(제로트러스트, N2FS 등) 기사를 가장 먼저 가져옵니다."""
+    try:
+        url = "https://www.boannews.com/media/news_rss.xml"
+        res = requests.get(url)
+        res.encoding = res.apparent_encoding # 인코딩 깨짐 방지
+        root = ET.fromstring(res.text)
+        
+        items = root.findall('.//item')
+        results = []
+        
+        target_keywords = ['제로트러스트', 'N2FS', '망분리', '다중계층', 'MLS', '보안가이드'] 
+        
+        # 1순위: 타겟 키워드가 포함된 기사 탐색
+        for item in items:
+            title = item.find('title').text
+            link = item.find('link').text
+            if any(kw in title.upper() for kw in target_keywords):
+                safe_title = html.escape(title.strip())
+                results.append(f"• 🚨 <a href='{link}'>{safe_title}</a>")
+                if len(results) >= count: break
+        
+        # 2순위: 키워드 기사가 부족하면 일반 최신 보안 속보로 채움
+        if len(results) < count:
+            for item in items:
+                title = item.find('title').text
+                link = item.find('link').text
+                safe_title = html.escape(title.strip())
+                formatted_link = f"• <a href='{link}'>{safe_title}</a>"
+                
+                if formatted_link not in results and not formatted_link.startswith("• 🚨"):
+                    results.append(formatted_link)
+                if len(results) >= count: break
+                
+        return "\n\n".join(results)
+    except Exception as e:
+        return "⚠️ 보안 전문 매체 속보를 불러오지 못했습니다."
+
+# --- [4-2. 통합 뉴스 구성] ---
 def get_all_news():
     news_parts = []
-    news_parts.append(f"🛡️ [국내 보안이슈]\n{search_keyword_news('정보보안 OR 랜섬웨어 OR 사이버위협', 3)}")
+    
+    # 1. 속도 최우선: 보안 매체 직접 크롤링 (키워드 매칭 시 강조)
+    news_parts.append(f"⚡ [보안뉴스 최신 속보]\n{get_boannews(3)}")
+    
+    # 2. 정확도 및 정책 동향: 구글 검색 키워드 고도화
+    news_parts.append(f"🛡️ [제로트러스트 & N2FS 종합 동향]\n{search_keyword_news('제로트러스트 OR N2FS OR 망분리 OR 다중계층보안', 3)}")
+    
+    # 3. 경쟁사/업계 동향
     news_parts.append(f"🏢 [보안회사 동향]\n{search_keyword_news('보안회사 OR 정보보안기업', 2)}")
-    news_parts.append(f"🔐 [제로트러스트 & N2FS]\n{search_keyword_news('제로트러스트 OR N2FS', 2)}")
+    
+    # 4. 일반 뉴스
     news_parts.append(f"📈 [오늘의 경제]\n{get_category_news('101', 3)}")
     news_parts.append(f"👥 [오늘의 사회]\n{get_category_news('102', 3)}")
+    
     return "\n\n━━━━━━━━━━━━━━━\n\n".join(news_parts)
 
 # --- [5. 텔레그램 전송 (HTML 모드)] ---
@@ -204,7 +249,7 @@ def send_telegram_message(text):
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
     if not bot_token or not chat_id:
-        print("❌ 에러: 깃허브 Secrets 설정 확인 필요")
+        print("❌ 에러: 환경 변수(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID) 설정 확인 필요")
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
